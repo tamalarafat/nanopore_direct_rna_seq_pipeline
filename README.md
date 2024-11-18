@@ -4,10 +4,10 @@ An end-to-end Snakemake pipeline for analyzing Oxford Nanopore direct RNA and DN
 __Snakemake workflow__
 ![Pipeline Overview](docs/pipeline_snapshot.png)
 
-__Nanopore Direct RNA Sequencing Pipeline Tutorial__. 
+__Nanopore Direct RNA Sequencing Pipeline Tutorial__   
 This pipeline is designed to process, analyze, and interpret direct RNA sequencing data from Oxford Nanopore sequencing technology. The workflow includes steps from raw data processing through base modification analysis, motif searching, differential expression analysis, and gene set enrichment. Here’s an overview of each stage.
 	
-Overview of Steps
+__Overview of Steps__
 
 Rule: download_dorado_model (Download Required Models)
 The pipeline begins with downloading base-calling and modification-calling models required for analyzing RNA signals. These models are obtained from the Oxford Nanopore Dorado repository.
