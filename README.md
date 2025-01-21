@@ -1,4 +1,16 @@
 # nanopore_direct_rna_seq_pipeline
+
+## License and Citation
+
+This repository is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
+
+If you use this repository in your work, please cite it as described in [CITATION.md](./CITATION.md).
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Attribution
+*This software is provided under the MIT License. If you use this code, please retain the copyright notice in all copies and provide proper credit to __Yasir Arafat Tamal__.*
+
 An end-to-end Snakemake pipeline for analyzing Oxford Nanopore direct RNA and DNA sequencing data, integrating Shell and R scripts. This pipeline automates the workflow from raw ionic signals to modification quantification, differential RNA or DNA modification, gene expression analysis, and downstream analyses, ensuring reproducibility and efficiency for nanopore long-read sequencing.
 
 __Snakemake workflow__
