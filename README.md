@@ -13,10 +13,11 @@ If you use this repository in your work, please cite it as described in [CITATIO
 
 
 ### Description
-Snakefile -> [Snakemake_analysis_pipeline](./Snakemake_analysis_pipeline).
-dependencies -> [dependency_envs](./Snakemake_analysis_pipeline).
-functions -> [R Functions for modification and RNA-seq](./Snakemake_analysis_pipeline).
-configuration -> [config file](./Snakemake_analysis_pipeline).
+Snakefile -> [Snakemake_analysis_pipeline](./Snakemake_analysis_pipeline).  
+dependencies -> [dependency_envs](./Snakemake_analysis_pipeline).  
+functions -> [R Functions for modification and RNA-seq](./Snakemake_analysis_pipeline).  
+configuration -> [config file](./Snakemake_analysis_pipeline).  
+Data -> https://www.dropbox.com/scl/fo/ikssq341td3ixlsn1d65d/ADxNcYcAA-uLCLvn-UghmjE?rlkey=y9r4ejt2dd2hvnxjo257f09r6&st=76914i0i&dl=0
 
 An end-to-end Snakemake pipeline for analyzing Oxford Nanopore direct RNA and DNA sequencing data, integrating Shell and R scripts. This pipeline automates the workflow from raw ionic signals to modification quantification, differential RNA or DNA modification, gene expression analysis, and downstream analyses, ensuring reproducibility and efficiency for nanopore long-read sequencing.
 
