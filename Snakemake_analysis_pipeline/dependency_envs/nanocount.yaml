@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.8  # Python version
+  - pip
+  - pip:
+      - NanoCount  # Install NanoCount through pip

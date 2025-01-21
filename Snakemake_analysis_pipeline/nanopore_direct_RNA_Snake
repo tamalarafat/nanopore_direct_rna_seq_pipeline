@@ -1,0 +1,496 @@
+# Load configuration file
+configfile: "configuration.yaml"
+
+# Get the sample names for using them in the tasks
+sample_names = list(config["samples"].keys())
+sample_names_string = " ".join(sample_names)
+
+# Rule to base-call all samples
+rule all:
+    input:
+        "ref/Homo_sapiens.GRCh38.cdna.all.fa",
+        expand("sequencing_summary/{sample}_sequencing_summary.tsv", sample=config["samples"].keys()),
+        expand("indexed_bams/{sample}_sorted_reads.bam", sample=config["samples"].keys()),
+        expand("indexed_bams/{sample}_sorted_reads.bam.bai", sample=config["samples"].keys()),
+        expand("transcript_expression_count/{sample}_transcript_counts.tsv", sample=config["samples"].keys()),
+        expand("modified_base_count/{sample}_modified_base_count.bed", sample=config["samples"].keys()),
+        expand("modification_analysis_output/01_converted_modified_base_count/{sample}_modified_base_count.RData", sample=config["samples"].keys()),
+        expand("modification_analysis_output/02_filtered_modified_base_count/{sample}_filtered_modification_sites.RData", sample=config["samples"].keys()),
+        "modification_analysis_output/03_merged_modified_sites/all_samples_merged_mod_count.RData", 
+        "modification_analysis_output/04_post_processed_mod_sites/processed_modified_sites.Rdata",
+        "modification_analysis_output/05_test_statistics_mod_sites/significant_mod_sites.Rdata",
+        "modification_analysis_output/06_fasta_subset/fasta_subset_significant_mod_sites.fasta",
+        "ref/gene_transcript_symbol.Rdata",
+        "modification_analysis_output/07_mod_sites_motifs/significant_mod_sites_motifs.Rdata",
+        "modification_analysis_output/07_mod_sites_motifs/significant_mod_sites_signature_motifs.RData",
+        "modification_analysis_output/07_mod_sites_motifs/annotated_sig_mod_sites_with_motifs.RData",
+        "modification_analysis_output/08_GSEA_output/GESA_log.txt",
+        "modification_analysis_output/09_consensus_motif/motif_log.txt",
+        "modification_analysis_output/10_DRACH_signatures_motif/DRACH_motif_log.txt",
+        "RNAseq_analysis_output/01_gene_count_table/gene_expression_count_table.RData",
+        "RNAseq_analysis_output/02_differential_gene_expression_output/DESeq_dataset.RData",
+        "RNAseq_analysis_output/02_differential_gene_expression_output/DESeq_results.RData",
+        "RNAseq_analysis_output/02_differential_gene_expression_output/complete_deg_table.tsv",
+        "RNAseq_analysis_output/03_characteristic_genes/condition_characteristic_deg_table.tsv",
+        "RNAseq_analysis_output/04_GSEA_and_annotation_output/annotated_DE_genes_table.tsv"
+
+# Rule to download Dorado models
+rule download_dorado_model:
+    output:
+        model_basecalling = directory(config["dorado_basecalling_model"]),
+        model_modification = directory(config["dorado_modification_model"])
+    params:
+        dorado_basecalling_model = config["dorado_basecalling_model"],
+        dorado_modification_model = config["dorado_modification_model"],
+        ontdorado = config["ontdorado"]
+    shell:
+        """
+        {params.ontdorado} download --model {params.dorado_basecalling_model} --models-directory .
+        {params.ontdorado} download --model {params.dorado_modification_model} --models-directory .
+        """
+
+rule get_cdna_transcriptome_reference:
+    output:
+        fasta = "ref/Homo_sapiens.GRCh38.cdna.all.fa",
+        gz = "ref/Homo_sapiens.GRCh38.cdna.all.fa.gz"
+    conda:
+        "dependency_envs/get_cdna.yaml"  # Path to the environment file with wget
+    shell:
+        """
+        mkdir -p ref
+        wget -P ref http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz
+        gunzip -c ref/Homo_sapiens.GRCh38.cdna.all.fa.gz > {output.fasta}
+        """
+
+# Rule to base-call individual samples
+rule basecall:
+    input:
+        data_dir = lambda wildcards: config["samples"][wildcards.sample]["data_dir"],
+        reference = rules.get_cdna_transcriptome_reference.output.fasta,
+        model_basecalling = rules.download_dorado_model.output.model_basecalling,
+        model_modification = rules.download_dorado_model.output.model_modification
+    output:
+        "basecalled_aligned_data/{sample}_basecalled_aligned_reads.bam"
+    params:
+        dorado = config["ontdorado"],
+        modification_call = config["modification_call"]
+    shell:
+        """
+        mkdir -p basecalled_aligned_data
+        {params.dorado} basecaller {input.model_basecalling} {input.data_dir} --modified-bases-models {input.model_modification} --reference $(pwd)/{input.reference} > {output}
+        """
+
+# Rule to generate sequencing summary from the basecalled reads
+rule sequencing_summary:
+    input:
+        "basecalled_aligned_data/{sample}_basecalled_aligned_reads.bam"
+    output:
+        "sequencing_summary/{sample}_sequencing_summary.tsv"
+    params:
+        dorado = config["ontdorado"]
+    shell:
+        """
+        mkdir -p sequencing_summary
+        {params.dorado} summary {input} > {output}
+        """
+
+# Rule to sort the BAM file by coordinate using samtools
+rule sort_bam:
+    input:
+        "basecalled_aligned_data/{sample}_basecalled_aligned_reads.bam"
+    output:
+        "indexed_bams/{sample}_sorted_reads.bam"
+    conda:
+        "dependency_envs/samtools.yaml"  # Path to the conda environment file for samtools
+    shell:
+        """
+        mkdir -p indexed_bams
+        samtools sort -o {output} {input}
+        """
+
+# Rule to index the sorted BAM file using samtools
+rule index_bam:
+    input:
+        "indexed_bams/{sample}_sorted_reads.bam"
+    output:
+        "indexed_bams/{sample}_sorted_reads.bam.bai"
+    conda:
+        "dependency_envs/samtools.yaml"  # Path to the conda environment file for samtools
+    shell:
+        """
+        samtools index {input}
+        """
+
+# Rule to generate transcript expression count tables
+rule generate_count:
+    input:
+        "indexed_bams/{sample}_sorted_reads.bam"
+    output:
+        "transcript_expression_count/{sample}_transcript_counts.tsv"
+    conda:
+        "dependency_envs/nanocount.yaml"  # Path to the conda environment file for NanoCount
+    shell:
+        """
+        mkdir -p transcript_expression_count
+        NanoCount -i {input} --extra_tx_info -o {output}
+        """
+
+# Rule to generate transcript expression count tables
+rule count_modified_bases:
+    input:
+        "indexed_bams/{sample}_sorted_reads.bam"
+    output:
+        "modified_base_count/{sample}_modified_base_count.bed"
+    conda:
+        "dependency_envs/modkit.yaml"  # Path to the conda environment file for ont-modkit
+    shell:
+        """
+        mkdir -p modified_base_count
+        modkit pileup {input} {output}
+        """
+
+# Rule to convert .bed file to .RData format using bed_conversion function
+rule bed_conversion:
+    input:
+        "modified_base_count/{sample}_modified_base_count.bed"
+    output:
+        "modification_analysis_output/01_converted_modified_base_count/{sample}_modified_base_count.RData"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "01_converted_modified_base_count",
+        sample_name = "{sample}"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/bed_conversion.R {input} {params.store_dir} {params.store_folder} {params.sample_name}
+        """
+
+# Rule to filter modification sites based on strand, number of delete, and number of different base at each site
+rule filter_modification_sites:
+    input:
+        "modification_analysis_output/01_converted_modified_base_count/{sample}_modified_base_count.RData"
+    output:
+        "modification_analysis_output/02_filtered_modified_base_count/{sample}_filtered_modification_sites.RData"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "02_filtered_modified_base_count",
+        retain_strand = "+",
+        retain_Ndiff_percent = 25,
+        retain_Ndel_percent = 25,
+        append_data = "FALSE"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/filter_modification_sites.R {input} {params.retain_strand} {params.retain_Ndiff_percent} {params.retain_Ndel_percent} {params.append_data} {params.store_dir} {params.store_folder} {output}
+        """
+
+# Rule to merge all samples based on common modification sites
+rule merge_all_samples:
+    input:
+        expand("modification_analysis_output/02_filtered_modified_base_count/{sample}_filtered_modification_sites.RData", sample=config["samples"].keys())
+    output:
+        "modification_analysis_output/03_merged_modified_sites/all_samples_merged_mod_count.RData"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "03_merged_modified_sites",
+        merge_columns = ",".join(config["merge_columns"]),  # Convert list to comma-separated string
+        joined_input = lambda wildcards, input: " ".join(input)  # Join input paths into a single string
+    conda:
+        "dependency_envs/bed_conversion.yaml" 
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/merge_samples.R "{params.joined_input}" "{params.merge_columns}" {output}
+        """
+
+# Rule to post processing of the merged all samples table containing shared modification sites
+rule post_processing_mod_sites:
+    input:
+        merged_data = "modification_analysis_output/03_merged_modified_sites/all_samples_merged_mod_count.RData"
+    output:
+        processed_data = "modification_analysis_output/04_post_processed_mod_sites/processed_modified_sites.Rdata"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "04_post_processed_mod_sites",
+        config_file_path = "configuration.yaml",
+        retain_Ncov_min = config["ncov_threshold"],
+        retain_min_diff_Modrate = config["differential_modification_threshold"]
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/post_processing_modified_sites.R {input.merged_data} {params.config_file_path} {params.retain_Ncov_min} {params.retain_min_diff_Modrate} {output.processed_data}
+        """
+
+# Rule to compute Z-statistics of merged all samples table containing shared modification sites
+rule compute_z_statistics:
+    input:
+        merged_data = "modification_analysis_output/04_post_processed_mod_sites/processed_modified_sites.Rdata"
+    output:
+        processed_data = "modification_analysis_output/05_test_statistics_mod_sites/significant_mod_sites.Rdata"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "05_test_statistics_mod_sites",
+        config_file_path = "configuration.yaml",
+        filter_by_pval = config["filter_by_pval_ztest"]
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/compute_Zstatistics.R {input.merged_data} {params.config_file_path} {params.filter_by_pval} {output.processed_data}
+        """
+
+# Rule to generate fasta subset and gene transcript table from ENSEMBL database
+rule generate_fasta_subset_gene_transcript:
+    input:
+        merged_data = "modification_analysis_output/05_test_statistics_mod_sites/significant_mod_sites.Rdata",
+        fasta_data = "ref/Homo_sapiens.GRCh38.cdna.all.fa"
+    output:
+        fasta_subset = "modification_analysis_output/06_fasta_subset/fasta_subset_significant_mod_sites.fasta",
+        gene_transcript_table = "ref/gene_transcript_symbol.Rdata"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "06_fasta_subset",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"  # Path to your conda environment file
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/fasta_subset_and_gene_transcript.R {input.merged_data} {params.config_file_path} {input.fasta_data} {output.fasta_subset} {output.gene_transcript_table}
+        """
+
+# Rule to detect and store motif for the modified sites
+rule motif_search:
+    input:
+        merged_data = "modification_analysis_output/05_test_statistics_mod_sites/significant_mod_sites.Rdata",
+        fasta_data = "modification_analysis_output/06_fasta_subset/fasta_subset_significant_mod_sites.fasta"
+    output:
+        processed_data = "modification_analysis_output/07_mod_sites_motifs/significant_mod_sites_motifs.Rdata"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "07_mod_sites_motifs",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"  # Path to your conda environment file
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/detect_motif.R {input.merged_data} {params.config_file_path} {input.fasta_data} {output.processed_data}
+        """
+
+# Rule to detect signature motifs
+rule find_signature_motifs:
+    input:
+        merged_data = "modification_analysis_output/07_mod_sites_motifs/significant_mod_sites_motifs.Rdata"
+    output:
+        processed_data = "modification_analysis_output/07_mod_sites_motifs/significant_mod_sites_signature_motifs.RData"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "07_mod_sites_motifs",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"  # Path to your conda environment file
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/detect_signature_motifs.R {input.merged_data} {params.config_file_path} {output.processed_data}
+        """
+
+# Rule to detect signature motifs
+rule annotate_modified_sites:
+    input:
+        merged_data = "modification_analysis_output/07_mod_sites_motifs/significant_mod_sites_signature_motifs.RData",
+        gene_transcript_table = "ref/gene_transcript_symbol.Rdata"
+    output:
+        processed_data = "modification_analysis_output/07_mod_sites_motifs/annotated_sig_mod_sites_with_motifs.RData"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "07_mod_sites_motifs",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"  # Path to your conda environment file
+    shell:
+        """
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/annotate_mod_sites.R {input.merged_data} {params.config_file_path} {input.gene_transcript_table} {output.processed_data}
+        """
+
+rule perform_GSEA:
+    input:
+        mod_tables = [
+            "modification_analysis_output/04_post_processed_mod_sites/processed_modified_sites.Rdata", 
+            "modification_analysis_output/07_mod_sites_motifs/annotated_sig_mod_sites_with_motifs.RData"
+        ],
+        gene_transcript_table = "ref/gene_transcript_symbol.Rdata"
+    output:
+        go_directories = [
+            directory("modification_analysis_output/08_GSEA_output/differential_mod_sites_GO"),
+            directory("modification_analysis_output/08_GSEA_output/significant_mod_sites_GO")
+        ],
+        output_log = "modification_analysis_output/08_GSEA_output/GESA_log.txt"
+    params:
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        # Create the main GSEA output folder if it doesn't exist
+        mkdir -p modification_analysis_output/08_GSEA_output
+
+        # List input and output paths directly
+        mod_table_1="{input.mod_tables[0]}"
+        mod_table_2="{input.mod_tables[1]}"
+        output_dir_1="{output.go_directories[0]}"
+        output_dir_2="{output.go_directories[1]}"
+
+        # Ensure output subdirectories exist
+        mkdir -p "$output_dir_1"
+        mkdir -p "$output_dir_2"
+        
+        # Run the R script for GO analysis with each input/output pair
+        Rscript rfunctions/perform_GSEA.R "$mod_table_1" {params.config_file_path} {input.gene_transcript_table} "$output_dir_1"
+        Rscript rfunctions/perform_GSEA.R "$mod_table_2" {params.config_file_path} {input.gene_transcript_table} "$output_dir_2"
+
+        # Log the completion of the GSEA analysis
+        echo "GSEA analysis completed on $(date)" > {output.output_log}
+        """
+
+rule consensus_motif_and_base_proportion:
+    input:
+        merged_data = "modification_analysis_output/07_mod_sites_motifs/annotated_sig_mod_sites_with_motifs.RData"
+    output:
+        output_log = "modification_analysis_output/09_consensus_motif/motif_log.txt"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "09_consensus_motif",
+        output_dir = "modification_analysis_output/09_consensus_motif",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        # Create the main GSEA output folder if it doesn't exist
+        mkdir -p {params.store_dir}/{params.store_folder}
+        
+        # Run the R script to get and store motifs
+        Rscript rfunctions/consensus_motif_and_base_proportion.R {input.merged_data} {params.config_file_path} {params.output_dir}
+
+        # Log the completion of the GSEA analysis
+        echo "Consensus motif plots and relative proportion of the bases at the motif site analysis completed on $(date)" > {output.output_log}
+        """
+
+rule generate_DRACH_signatures:
+    input:
+        merged_data = "modification_analysis_output/07_mod_sites_motifs/annotated_sig_mod_sites_with_motifs.RData"
+    output:
+        output_log = "modification_analysis_output/10_DRACH_signatures_motif/DRACH_motif_log.txt"
+    params:
+        store_dir = "modification_analysis_output",
+        store_folder = "10_DRACH_signatures_motif",
+        output_dir = "modification_analysis_output/10_DRACH_signatures_motif",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        # Create the main GSEA output folder if it doesn't exist
+        mkdir -p {params.store_dir}/{params.store_folder}
+        
+        # Run the R script to get and store motifs
+        Rscript rfunctions/generate_DRACH_signature_motif.R {input.merged_data} {params.config_file_path} {params.output_dir}
+
+        # Log the completion of the GSEA analysis
+        echo "Consensus DRACH and other signature motif plots and relative proportion of the bases at the motif site analysis completed on $(date)" > {output.output_log}
+        """
+
+# Rule to prepare nanocount table
+rule generate_gene_expression_count:
+    input:
+        input_count = expand("transcript_expression_count/{sample}_transcript_counts.tsv", sample=config["samples"].keys()),
+        gene_transcript_table = "ref/gene_transcript_symbol.Rdata"
+    output:
+        "RNAseq_analysis_output/01_gene_count_table/gene_expression_count_table.RData"
+    params:
+        store_dir = "RNAseq_analysis_output",
+        store_folder = "01_gene_count_table",
+        joined_input = lambda wildcards, input: " ".join(input.input_count),  # Join input paths into a single string
+        sample_names = sample_names_string,
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/generate_gene_expression_count.R "{params.joined_input}" "{params.sample_names}" {params.config_file_path} {input.gene_transcript_table} {output}
+        """
+
+# Rule to prepare nanocount table
+rule perform_differential_expression_analysis:
+    input:
+        input_count = "RNAseq_analysis_output/01_gene_count_table/gene_expression_count_table.RData"
+    output:
+        output_deseq_data = "RNAseq_analysis_output/02_differential_gene_expression_output/DESeq_dataset.RData",
+        output_deseq_result = "RNAseq_analysis_output/02_differential_gene_expression_output/DESeq_results.RData",
+        output_DEG_table = "RNAseq_analysis_output/02_differential_gene_expression_output/complete_deg_table.tsv"
+    params:
+        store_dir = "RNAseq_analysis_output",
+        store_folder = "02_differential_gene_expression_output",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/differential_gene_expression_analysis.R {input.input_count} {params.config_file_path} {output.output_deseq_data} {output.output_deseq_result} {output.output_DEG_table}
+        """
+
+# Rule to prepare nanocount table
+rule identify_condition_characteristic_genes:
+    input:
+        input_count = "RNAseq_analysis_output/02_differential_gene_expression_output/DESeq_results.RData"
+    output:
+        output_DEG_table = "RNAseq_analysis_output/03_characteristic_genes/condition_characteristic_deg_table.tsv"
+    params:
+        store_dir = "RNAseq_analysis_output",
+        store_folder = "03_characteristic_genes",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/identify_condition_characteristic_genes.R {input.input_count} {params.config_file_path} {output.output_DEG_table}
+        """
+
+# Rule to prepare nanocount table
+rule GSEA_and_genes_annotation:
+    input:
+        input_count = "RNAseq_analysis_output/03_characteristic_genes/condition_characteristic_deg_table.tsv",
+        gene_transcript_table = "ref/gene_transcript_symbol.Rdata"
+    output:
+        output_DEG_table = "RNAseq_analysis_output/04_GSEA_and_annotation_output/annotated_DE_genes_table.tsv"
+    params:
+        store_dir = "RNAseq_analysis_output",
+        store_folder = "04_GSEA_and_annotation_output",
+        config_file_path = "configuration.yaml"
+    conda:
+        "dependency_envs/bed_conversion.yaml"
+    shell:
+        """
+        mkdir -p {params.store_dir}
+        mkdir -p {params.store_dir}/{params.store_folder}
+        Rscript rfunctions/GSEA_and_gene_annotation.R {input.input_count} {params.config_file_path} {input.gene_transcript_table} {output.output_DEG_table}
+        """
+
+

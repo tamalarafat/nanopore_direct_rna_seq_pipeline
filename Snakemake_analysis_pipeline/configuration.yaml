@@ -1,0 +1,91 @@
+samples:
+  hct_ctr:
+    data_dir: "/Users/ya_tamal/Documents/Data_deposit/pod5_depo/hct_ctr/"
+  hct_ki:
+    data_dir: "/Users/ya_tamal/Documents/Data_deposit/pod5_depo/hct_ki/"
+  dld_ctr:
+    data_dir: "/Users/ya_tamal/Documents/Data_deposit/pod5_depo/dld_ctr/"
+  dld_ki:
+    data_dir: "/Users/ya_tamal/Documents/Data_deposit/pod5_depo/dld_ki/"
+
+### RNA/DNA modification analysis configuration
+# Conditon: defining which samples belong to which group
+conditions:
+  control:
+    - hct_ctr
+    - dld_ctr
+  ki:
+    - hct_ki
+    - dld_ki
+
+# Cell line information - would be needed for differential gene expression analysis
+cell_line:
+  hct:
+    - hct_ctr
+    - hct_ki
+  dld:
+    - dld_ctr
+    - dld_ki
+
+# Define the comparison sequence for calculating differential calculation. Effect = reference group - treatment group.
+# The first entry is the reference group
+effect:
+  - control # This is the reference group;
+  - ki      # This is a treatment group;
+
+# Columns to merge by: merge samples modification tables by the column tags/names
+merge_columns:
+  - "ref_seq_id"
+  - "start_pos"
+  - "strand"
+
+# Threshold for filtering modification sites based on minimum number of reads or coverage in any of the samples
+ncov_threshold: 30   # Options: "integer", "NULL"
+
+# Threshold for filtering modification sites based on differential modification rate
+differential_modification_threshold: 10   # Options: "integer", "NULL"
+
+# Threshold for filtering modification sites based on p-value of Z-statistics
+filter_by_pval_ztest: 0.05   # Options: "integer", "NULL"
+
+# Motif search window
+motif_base: "A"
+motif_window_left: 2 # can be of any length
+motif_window_right: 2 # can be of any length
+
+# To detect signature motif patterns - such as, DRACH motif
+signature_motif_pattern:
+  DRACH: "[AGU][AG]AC[ACU]"  # Explanation : D = A, G, or U; R = A or G; H = A, C, or U
+  # Example: "[ACU][AG]AC[AGU]"
+
+# Global output directory for results
+# result_output: "/Users/ya_tamal/Documents/Projects/nanopore_directRNA_toolkit"
+
+# The directory to store the basecalled aligned data
+# basecalled_output: "basecalled_aligned_data"
+
+# Reference genome path
+# reference: "/ds/storage/common/ytamal_work/Project_14052024_ONT_RNAseq/References/Transcripts/Homo_sapiens.GRCh38.cdna.all.fa"
+
+# Path to dorado tool
+ontdorado: "/Users/ya_tamal/Documents/Tools/dorado-0.8.2-osx-arm64/bin/dorado"
+
+# Basecalling and modification parameters
+# model_dir: "/Users/yasir/Documents/Projects/my_projects/first_snakemake/models"
+analyte_type: "RNA"
+biomart_search_filter: "ensembl_transcript_id"
+biomart_attribute_search: "hgnc_symbol"
+dorado_basecalling_model: "rna004_130bps_hac@v5.0.0"
+dorado_modification_model: "rna004_130bps_hac@v5.0.0_m6A@v1"
+modification_call: "m6A"
+
+### RNA-seq: gene expression analysis configuration
+# Gene expression count table, Gene ID or names to assign in the gene expression count table. Define the name class "ensembl_gene_id", "ensembl_gene_id_version", "hgnc_symbol"
+assign_gene_ID_type: "ensembl_gene_id"
+
+# Differential gene expression analysis
+control_for_cell_line_effect: "TRUE"  # Input "TRUE" or "FALSE"
+gene_exp_threshold_filter: 10 # This threshold is used to filter genes if this much expression is not detected in each of the sample
+p_val_threshold_deg: FALSE # Input can be "FALSE" or a value, eg., 0.05
+adusted.pval_threshold_deg: FALSE  # Input can be "FALSE" or a value, eg., 0.05
+log2FC_threshold_deg: 0.25 # Input can be "FALSE" or a value

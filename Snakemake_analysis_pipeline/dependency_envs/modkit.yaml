@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+subdir: osx-64  # Force conda to search in the osx-64 subdirectory
+dependencies:
+  - python=3.6  # Python version
+  - ont-modkit==0.4.1
